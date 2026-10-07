@@ -2,7 +2,7 @@
 
 Dallas crime and neighborhood intelligence on one screen. Every reported crime from the
 last four years is plotted as its own point. Search any address and the map flies in,
-draws a **5 km buffer**, and the sidebar fills with home values, weather, and a breakdown
+draws a **1 km buffer**, and the sidebar fills with home values, weather, and a breakdown
 of what's happening around that location.
 
 ---
