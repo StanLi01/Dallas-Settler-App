@@ -5,3 +5,5 @@ __pycache__/
 venv/
 .DS_Store*.bak
 update_repo.ps1
+*.bak
+.DS_Store
