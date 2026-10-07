@@ -18,7 +18,7 @@ searching never removes them.
 | Output | Detail |
 |---|---|
 | Map | Flies to the address and fits the view to the full 1 km buffer |
-| Buffer | One dashed 5 km ring so you can see every surrounding crime at a glance |
+| Buffer | One dashed 1 km ring so you can see every surrounding crime at a glance |
 | Weather | Temperature, condition, wind, rain chance at that spot |
 | Home values | Median value 2019–2023 (Census ACS 5-year) as a bar chart |
 | Crime summary | Count at the exact address, and count within 1 km |
