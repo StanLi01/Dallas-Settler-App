@@ -21,7 +21,7 @@ searching never removes them.
 | Buffer | One dashed 5 km ring so you can see every surrounding crime at a glance |
 | Weather | Temperature, condition, wind, rain chance at that spot |
 | Home values | Median value 2019–2023 (Census ACS 5-year) as a bar chart |
-| Crime summary | Count at the exact address, and count within 5 km |
+| Crime summary | Count at the exact address, and count within 1 km |
 | Top crime types | Ranked bar chart of the most common offenses in the buffer |
 | Nearest crimes | Sorted by distance, each labeled with how far away it is |
 
@@ -98,7 +98,7 @@ While it loads, the sidebar badge polls the backend and shows a live count
 |---|---|---|
 | GET | `/` | The app |
 | POST | `/api/lookup` | `{lat, lon, address, weather, buffer_km}` |
-| POST | `/api/analyze` | Home values, crimes at address, crimes within 5 km, type breakdown |
+| POST | `/api/analyze` | Home values, crimes at address, crimes within 1 km, type breakdown |
 | GET | `/api/crimes/geojson` | Every crime as a GeoJSON point |
 | GET | `/api/crimes/progress` | `{status, fetched, error}` — powers the loading badge |
 | GET | `/api/crimes/status` | Cache count, age, configured buffer |
@@ -112,7 +112,7 @@ of features: `a` = address, `t` = incident type, `y` = year.
 
 Edit these constants at the top of `main.py`:
 
-    BUFFER_KM       = 5.0    # search radius
+    BUFFER_KM       = 1.0    # search radius
     YEARS_BACK      = 4      # how far back to pull crime data
     CACHE_TTL_HOURS = 6      # how long before re-fetching
     FETCH_PAGE_SIZE = 50000  # rows per API page
