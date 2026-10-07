@@ -1,47 +1,57 @@
 # The Settler App
 
-Dallas crime and neighborhood intelligence on one screen. Every reported crime from the
-last four years is plotted as its own point. Search any address and the map flies in,
-draws a **5 km buffer**, and the sidebar fills with home values, weather, and a breakdown
-of what's happening around that location.
+**Dallas crime and neighborhood intelligence for people deciding where to live.**
+
+Search any Dallas address and Settler shows what has actually been happening around it: four years of police incidents, how the area compares to the citywide baseline, when incidents tend to happen, who and what gets targeted, where home values are heading, and an equity audit that flags when a high crime count may reflect heavier policing rather than greater danger to residents.
+
+<!-- Add screenshots to the docs/ folder, then uncomment:
+![Map view](docs/map.png)
+![Equity audit](docs/equity.png)
+-->
 
 ---
 
-## What it does
+## Why I built it
 
-**On load** — Fetches every crime record from Dallas Open Data (paginated, so nothing is
-truncated) and plots each one as a small red dot. These stay on the map permanently;
-searching never removes them.
+A friend moved to Dallas without knowing the city and asked me a simple question: "Is this neighborhood safe?" The data to answer that exists, but it is spread across police records and census tables, and the commercial tools that summarize it do not show their methods. Settler puts it in one place and is transparent about how every number is produced.
 
-**On search** — Geocodes the address, then:
+---
 
-| Output | Detail |
-|---|---|
-| Map | Flies to the address and fits the view to the full 5 km buffer |
-| Buffer | One dashed 5 km ring so you can see every surrounding crime at a glance |
-| Weather | Temperature, condition, wind, rain chance at that spot |
-| Home values | Median value 2019–2023 (Census ACS 5-year) as a bar chart |
-| Crime summary | Count at the exact address, and count within 5 km |
-| Top crime types | Ranked bar chart of the most common offenses in the buffer |
-| Nearest crimes | Sorted by distance, each labeled with how far away it is |
+## Analytic layers
 
-**Theme toggle** — Dark and light modes. The Leaflet basemap tiles swap along with the UI.
+All comparisons are made against a citywide baseline built from the same dataset, within a **1 km radius** of the searched address.
+
+| # | Layer | What it tells you |
+|---|-------|-------------------|
+| 1 | **Risk decomposition** | An additive log-density score split into violent, property, vice, other, recency and clustering components. For an additive model each bar is that feature's exact Shapley contribution; zero means citywide-typical. |
+| 2 | **Enforcement-equity audit** | Compares the local share of officer-initiated (discretionary) offenses such as drugs, trespass, warrants and traffic against the citywide norm, and relates it to ZIP-level median income from the Census. Flags areas where counts are likely inflated by enforcement intensity. |
+| 3 | **Trajectory forecasting** | OLS trends with 80% and 95% prediction intervals for both local crime counts and median home values. The current, incomplete year is excluded. |
+| 4 | **Temporal profile** | Hour-of-day and day-of-week patterns, indexed against the citywide distribution. |
+| 5 | **Case outcomes** | Clearance rates indirectly standardized by offense mix, so an area is not penalized or flattered simply for having a different blend of crime types. |
+| 6 | **Exposure profile** | Where incidents occur (homes, apartments, parking, streets, businesses), victim types, and the share of violent incidents involving a weapon. |
+
+### A note on fairness
+
+Raw crime counts can unfairly stigmatize neighborhoods. Officer-initiated offenses are recorded where police choose to patrol, so heavily policed areas can look more dangerous than they are for residents. Dallas does not publish an arrest-initiation flag, so Settler uses the discretionary-offense share as a proxy. It is a screening indicator, not evidence of bias in any individual case.
 
 ---
 
 ## Setup
 
-One-time install:
+```bash
+git clone https://github.com/StanLi01/Dallas-Settler-App.git
+cd Dallas-Settler-App
+python -m venv venv
+venv\Scripts\activate            # Mac/Linux: source venv/bin/activate
+pip install -r requirements.txt
+```
 
-    cd settler_web
-    python -m venv venv
-    source venv/bin/activate          # Windows: venv\Scripts\activate
-    pip install fastapi "uvicorn[standard]" requests python-dotenv jinja2
+Copy `.env.example` to `.env` and fill it in:
 
-Create `.env` in the `settler_web/` folder:
-
-    USER_AGENT_EMAIL=you@example.com
-    CENSUS_API_KEY=your_census_key_here
+```
+USER_AGENT_EMAIL=you@example.com
+CENSUS_API_KEY=your_census_key_here
+```
 
 A free Census key takes about a minute: https://api.census.gov/data/key_signup.html
 
@@ -49,116 +59,69 @@ A free Census key takes about a minute: https://api.census.gov/data/key_signup.h
 
 ## Running it
 
-**Without a terminal** — double-click `run_app.py`. It starts the server and
-opens your browser automatically. Close the console window to stop it.
+**Without a terminal:** double-click `run_app.py`. It starts the server and opens your browser.
 
 **With a terminal:**
 
-    cd settler_web
-    uvicorn main:app --reload --port 8000
+```bash
+uvicorn main:app --reload --port 8000
+```
 
 Then open http://localhost:8000
 
----
+### First load takes 30-90 seconds
 
-## First load takes 30–90 seconds
-
-This is expected, not a bug. Dallas Open Data caps how many rows a single request can
-return, so the backend pages through the dataset with `$offset` in 50,000-row
-chunks until it reaches the end. Four years of citywide data is typically 2–4 sequential
-requests.
-
-Two things make it as fast as it can be:
-
-- The query uses `$select` to pull only the eight columns the app actually
-  needs, instead of all ~70 fields per record.
-- Results are cached server-side for 6 hours, so every reload after the first is instant.
-
-While it loads, the sidebar badge polls the backend and shows a live count
-("Fetched 50,000 records…") rather than a spinner that tells you nothing.
+Dallas Open Data caps rows per request, so the backend pages through the dataset in 50,000-row chunks. The query selects only the columns the app needs, and results are cached server-side for 6 hours, so later loads are instant. A live badge shows progress while it loads.
 
 ---
 
-## Project layout
+## Configuration
 
-    settler_web/
-    ├── main.py             # FastAPI backend
-    ├── run_app.py          # Double-click launcher
-    ├── templates/
-    │   └── index.html      # Entire UI: map, sidebar, theme toggle
-    ├── static/             # (empty — for custom assets)
-    ├── .env                # Your keys — do not commit
-    └── README.md
+Constants at the top of `main.py`:
+
+```python
+BUFFER_KM       = 1.0    # analysis radius
+YEARS_BACK      = 4      # how far back to pull crime data
+CACHE_TTL_HOURS = 6      # how long before re-fetching
+FETCH_PAGE_SIZE = 50000  # rows per API page
+```
 
 ---
 
 ## API reference
 
 | Method | Path | Returns |
-|---|---|---|
+|--------|------|---------|
 | GET | `/` | The app |
-| POST | `/api/lookup` | `{lat, lon, address, weather, buffer_km}` |
-| POST | `/api/analyze` | Home values, crimes at address, crimes within 5 km, type breakdown |
+| POST | `/api/lookup` | Coordinates, weather, buffer radius |
+| POST | `/api/analyze` | Home values, nearby crimes, and all six analytic layers |
 | GET | `/api/crimes/geojson` | Every crime as a GeoJSON point |
-| GET | `/api/crimes/progress` | `{status, fetched, error}` — powers the loading badge |
+| GET | `/api/crimes/progress` | Fetch progress for the loading badge |
 | GET | `/api/crimes/status` | Cache count, age, configured buffer |
-
-GeoJSON properties are abbreviated to keep the payload small across tens of thousands
-of features: `a` = address, `t` = incident type, `y` = year.
-
----
-
-## Configuration
-
-Edit these constants at the top of `main.py`:
-
-    BUFFER_KM       = 5.0    # search radius
-    YEARS_BACK      = 4      # how far back to pull crime data
-    CACHE_TTL_HOURS = 6      # how long before re-fetching
-    FETCH_PAGE_SIZE = 50000  # rows per API page
-
----
-
-## If the map has no dots
-
-1. **Check the console window** running the server. You should see:
-
-       [Settler] Fetched 50000 rows (total: 50000)
-       [Settler] Total records fetched: 134221
-       [Settler] Records with coordinates: 131004
-
-   Silence means the browser request never reached the backend.
-
-2. **Confirm you're editing the folder you're running.** If more than one copy of this
-   project exists on disk, run `pwd` immediately before starting the server.
-
-3. **Hard-refresh** — Ctrl+Shift+R (Windows/Linux) or Cmd+Shift+R (Mac). Browsers cache
-   `index.html` and its inline script aggressively.
-
-4. **Read the badge.** It reports the exact error text if the fetch fails, so you won't
-   have to guess whether it's slow or broken.
-
----
-
-## Deploying
-
-**Render** — build `pip install -r requirements.txt`, start
-`uvicorn main:app --host 0.0.0.0 --port $PORT`, and set `USER_AGENT_EMAIL`
-and `CENSUS_API_KEY` as environment variables.
-
-**Railway** — `railway init && railway up`, then add the same two variables in
-the dashboard.
-
-For production with multiple workers, swap the in-memory `_crime_cache` dict for
-Redis so all processes share one cache instead of each fetching separately.
+| GET | `/api/clearance/by-class` | Citywide clearance rate per offense class |
 
 ---
 
 ## Data sources
 
-- **Crime** — [Dallas Open Data, Police Incidents](https://www.dallasopendata.com/resource/qv6i-rri7.json) (SODA API)
-- **Home values** — [Census ACS 5-year](https://api.census.gov/data/), variable B25077_001E
-- **Tract lookup** — [FCC Block API](https://geo.fcc.gov/api/census/block/find)
-- **Weather** — [Open-Meteo](https://open-meteo.com/) (no key required)
-- **Geocoding** — [Nominatim / OpenStreetMap](https://nominatim.openstreetmap.org/)
-- **Tiles** — CARTO Dark Matter and Positron
+- **Crime:** Dallas Open Data, Police Incidents (SODA API)
+- **Home values and demographics:** U.S. Census ACS 5-year (B25077, B19013, B01003)
+- **Tract lookup:** FCC Census Block API
+- **Weather:** Open-Meteo
+- **Geocoding:** Nominatim / OpenStreetMap
+- **Map tiles:** CARTO
+
+---
+
+## Limitations
+
+- Reported incidents are not the same as all crime; under-reporting varies by area and offense.
+- Incident times are often discovery times, which shifts some property crime toward mornings.
+- ACS estimates are smoothed over five years, so home-value forecasts have wide intervals.
+- The equity audit is a proxy-based screening tool, not a causal finding.
+
+---
+
+## Feedback
+
+Issues and suggestions are welcome, especially on methodology.
