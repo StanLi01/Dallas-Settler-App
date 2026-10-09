@@ -6,6 +6,9 @@ Search any Dallas address and Settler shows what has actually been happening aro
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/StanLi01/Dallas-Settler-App)
 
+▶️ Try it live: [your-app.onrender.com](https://dallas-settler-app-9fh3.onrender.com)
+Hosted on a free tier, so the first visit may take a minute to wake up.
+
 <!-- LIVE DEMO: after deploying, replace this comment with:
 **Live demo:** https://YOUR-APP.onrender.com (free hosting sleeps when idle, so the first visit can take a minute or two)
 -->
