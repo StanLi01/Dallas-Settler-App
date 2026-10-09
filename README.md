@@ -4,9 +4,8 @@
 
 Search any Dallas address and Settler shows what has actually been happening around it: four years of police incidents within 1 km, how the area compares to the citywide baseline, when and where incidents tend to happen, where crime and home values are heading, and an **equity audit** that flags when a high crime count may reflect heavier policing rather than greater danger to residents.
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/StanLi01/Dallas-Settler-App)
-
 ▶️ Try it live: [your-app.onrender.com](https://dallas-settler-app-9fh3.onrender.com)
+
 Hosted on a free tier, so the first visit may take a minute to wake up.
 
 <!-- LIVE DEMO: after deploying, replace this comment with:
