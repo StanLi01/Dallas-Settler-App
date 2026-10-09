@@ -4,13 +4,9 @@
 
 Search any Dallas address and Settler shows what has actually been happening around it: four years of police incidents within 1 km, how the area compares to the citywide baseline, when and where incidents tend to happen, where crime and home values are heading, and an **equity audit** that flags when a high crime count may reflect heavier policing rather than greater danger to residents.
 
-▶️ Try it live: [your-app.onrender.com](https://dallas-settler-app-9fh3.onrender.com)
+### ▶️ [Try it live](https://dallas-settler-app-9fh3.onrender.com)
 
-Hosted on a free tier, so the first visit may take a minute to wake up.
-
-<!-- LIVE DEMO: after deploying, replace this comment with:
-**Live demo:** https://YOUR-APP.onrender.com (free hosting sleeps when idle, so the first visit can take a minute or two)
--->
+*Hosted on a free tier, so the first visit may take a minute to wake up.*
 
 <!-- SCREENSHOTS: add images to docs/, then uncomment:
 ![Map view](docs/map.png)
@@ -87,7 +83,7 @@ Dallas Open Data caps rows per request, so the backend pages through the dataset
 
 ## Deploying
 
-**Render (one click):** use the Deploy to Render button above. The included `render.yaml` sets the build and start commands; Render will ask you for `USER_AGENT_EMAIL` and `CENSUS_API_KEY`.
+**Render:** the included `render.yaml` sets the build and start commands; set `USER_AGENT_EMAIL` and `CENSUS_API_KEY` as environment variables.
 
 **Railway:** `railway init && railway up`, then add the same two variables in the dashboard.
 
@@ -133,7 +129,7 @@ Dallas-Settler-App/
 ├── static/             # Static assets
 ├── docs/               # Screenshots
 ├── requirements.txt
-├── render.yaml         # One-click Render deploy
+├── render.yaml         # Render deploy config
 ├── .env.example        # Copy to .env and add your keys
 └── LICENSE
 ```
