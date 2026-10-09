@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: dallas-settler-app
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: USER_AGENT_EMAIL
+        sync: false
+      - key: CENSUS_API_KEY
+        sync: false
