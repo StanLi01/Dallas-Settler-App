@@ -42,109 +42,6 @@ Raw crime counts can unfairly stigmatize neighborhoods. Officer-initiated offens
 
 ---
 
-## Setup
-
-```bash
-git clone https://github.com/StanLi01/Dallas-Settler-App.git
-cd Dallas-Settler-App
-python -m venv venv
-venv\Scripts\activate            # Mac/Linux: source venv/bin/activate
-pip install -r requirements.txt
-```
-
-Copy `.env.example` to `.env` and fill it in:
-
-```
-USER_AGENT_EMAIL=you@example.com
-CENSUS_API_KEY=your_census_key_here
-```
-
-A free Census key takes about a minute: https://api.census.gov/data/key_signup.html
-
----
-
-## Running it
-
-**Without a terminal:** double-click `run_app.py`. It starts the server and opens your browser. Close the console window to stop it.
-
-**With a terminal:**
-
-```bash
-uvicorn main:app --reload --port 8000
-```
-
-Then open http://localhost:8000
-
-### First load takes 30-90 seconds
-
-Dallas Open Data caps rows per request, so the backend pages through the dataset in 50,000-row chunks. The query selects only the columns the app needs, and results are cached server-side for 6 hours, so later loads are instant. A live badge shows progress ("Fetched 50,000 records...") while it loads.
-
----
-
-## Deploying
-
-**Render:** the included `render.yaml` sets the build and start commands; set `USER_AGENT_EMAIL` and `CENSUS_API_KEY` as environment variables.
-
-**Railway:** `railway init && railway up`, then add the same two variables in the dashboard.
-
-For production with multiple workers, swap the in-memory crime cache for Redis so all processes share one cache.
-
----
-
-## Configuration
-
-Constants at the top of `main.py`:
-
-```python
-BUFFER_KM       = 1.0    # analysis radius
-YEARS_BACK      = 4      # how far back to pull crime data
-CACHE_TTL_HOURS = 6      # how long before re-fetching
-FETCH_PAGE_SIZE = 50000  # rows per API page
-```
-
----
-
-## API reference
-
-| Method | Path | Returns |
-|--------|------|---------|
-| GET | `/` | The app |
-| POST | `/api/lookup` | Coordinates, weather, buffer radius |
-| POST | `/api/analyze` | Home values, nearby crimes, and all six analytic layers |
-| GET | `/api/crimes/geojson` | Every crime as a GeoJSON point |
-| GET | `/api/crimes/progress` | Fetch progress for the loading badge |
-| GET | `/api/crimes/status` | Cache count, age, configured buffer |
-| GET | `/api/clearance/by-class` | Citywide clearance rate per offense class |
-
----
-
-## Project layout
-
-```
-Dallas-Settler-App/
-├── main.py             # FastAPI backend and all analytics
-├── run_app.py          # Double-click launcher
-├── templates/
-│   └── index.html      # UI: map, sidebar, theme toggle
-├── static/             # Static assets
-├── docs/               # Screenshots
-├── requirements.txt
-├── render.yaml         # Render deploy config
-├── .env.example        # Copy to .env and add your keys
-└── LICENSE
-```
-
----
-
-## Troubleshooting: the map has no dots
-
-1. Check the console running the server. You should see lines like `[Settler] Total records fetched: ...`. Silence means the browser request never reached the backend.
-2. Confirm you are running the folder you are editing.
-3. Hard-refresh with Ctrl+Shift+R (Cmd+Shift+R on Mac).
-4. Read the loading badge; it shows the exact error if the fetch fails.
-
----
-
 ## Data sources
 
 - **Crime:** [Dallas Open Data, Police Incidents](https://www.dallasopendata.com/) (SODA API)
@@ -169,6 +66,10 @@ Dallas-Settler-App/
 
 Issues and suggestions are welcome, especially on methodology.
 
+## Using the app
+
+Settler is available only as a hosted web app: **[open it here](https://dallas-settler-app-9fh3.onrender.com)**. Nothing to install. The first visit may take a minute or two while the free server wakes up and loads four years of crime data; after that it's fast.
+
 ## License
 
-MIT, see [LICENSE](LICENSE).
+Copyright (c) 2026 Stanley Osondu. All rights reserved. The source code is not licensed for copying, modification, redistribution or self-hosting. See [LICENSE](LICENSE).
