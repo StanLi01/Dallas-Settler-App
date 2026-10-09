@@ -252,7 +252,9 @@ var canvasRenderer = L.canvas({padding:0.4});
 var map = L.map('map',{zoomControl:true,preferCanvas:true}).setView([32.78,-96.80],11);
 map.attributionControl.setPrefix('');
 var pointsLayer=L.layerGroup(), bufferLayer=L.layerGroup().addTo(map), searchMarker=null;
-var allFeatures=[], heatBins=[], userMode='auto', activeMode=null, lastData=null;
+/* Map points: flat array, 6 numbers per incident (lat, lon, type idx, class idx, year-Y0, address idx) */
+var PTS=[], NPTS=0, PT_TYPES=[], PT_ADDRS=[], PT_CLS=[], PT_Y0=0;
+var heatBins=[], userMode='auto', activeMode=null, lastData=null;
 
 var arrowIcon = L.divIcon({className:'arrow-marker',
   html:'<svg width="30" height="38" viewBox="0 0 24 30"><path d="M12 30 L3 9 L12 13 L21 9 Z" '+
@@ -287,11 +289,11 @@ document.getElementById('mode-seg').addEventListener('click',function(e){
 });
 function resolveMode(){ return userMode!=='auto' ? userMode : (map.getZoom()>=POINT_FROM_ZOOM?'points':'heat'); }
 
-function buildHeatBins(f){
-  var m=Object.create(null),i,c,ky,kx,key,e;
-  for(i=0;i<f.length;i++){
-    c=f[i].geometry.coordinates;
-    ky=Math.round(c[1]/HEAT_CELL); kx=Math.round(c[0]/HEAT_CELL);
+function buildHeatBins(){
+  var m=Object.create(null),i,j,ky,kx,key,e;
+  for(i=0;i<NPTS;i++){
+    j=i*6;
+    ky=Math.round(PTS[j]/HEAT_CELL); kx=Math.round(PTS[j+1]/HEAT_CELL);
     key=ky+'|'+kx; e=m[key];
     if(e) e[2]++; else m[key]=[ky*HEAT_CELL,kx*HEAT_CELL,1];
   }
@@ -306,17 +308,17 @@ function buildHeatLayer(){
 }
 var pointTimer=null;
 function renderPointsInView(){
-  if(!allFeatures.length) return;
+  if(!NPTS) return;
   pointsLayer.clearLayers();
   var b=map.getBounds(), s=b.getSouth(),n=b.getNorth(),w=b.getWest(),e=b.getEast();
-  var drawn=0,i,f,c,la,ln;
-  for(i=0;i<allFeatures.length;i++){
-    f=allFeatures[i]; c=f.geometry.coordinates; ln=c[0]; la=c[1];
+  var drawn=0,i,j,la,ln;
+  for(i=0;i<NPTS;i++){
+    j=i*6; la=PTS[j]; ln=PTS[j+1];
     if(la<s||la>n||ln<w||ln>e) continue;
     L.circleMarker([la,ln],{renderer:canvasRenderer,radius:3.5,
-      fillColor:CLS_COLOR[f.properties.c]||'#ff5c5c',color:'#fff',weight:0.7,fillOpacity:0.85})
-      .bindPopup('<b>'+esc(f.properties.t)+'</b><br>'+esc(f.properties.a)+
-                 '<br><span style="opacity:.65">'+esc(f.properties.y)+'</span>').addTo(pointsLayer);
+      fillColor:CLS_COLOR[PT_CLS[PTS[j+3]]]||'#ff5c5c',color:'#fff',weight:0.7,fillOpacity:0.85})
+      .bindPopup('<b>'+esc(PT_TYPES[PTS[j+2]])+'</b><br>'+esc(PT_ADDRS[PTS[j+5]])+
+                 '<br><span style="opacity:.65">'+(PT_Y0+PTS[j+4])+'</span>').addTo(pointsLayer);
     if(++drawn>=POINT_CAP) break;
   }
   updateHint(drawn);
@@ -373,14 +375,17 @@ var pollTimer=setInterval(function(){
   }).catch(function(){});
 },1200);
 
-fetch('/api/crimes/geojson').then(function(r){return r.json();}).then(function(gj){
+fetch('/api/crimes/points').then(function(r){
+  if(!r.ok) throw new Error('Server returned '+r.status+'. It may still be starting up; refresh in a minute.');
+  return r.json();
+}).then(function(d){
   clearInterval(pollTimer);
-  if(!gj.features.length){ setBadge('No crime data returned.'); headerCount.innerHTML='Crime data: <b>0</b>'; return; }
-  allFeatures=gj.features;
+  PTS=d.p; NPTS=Math.floor(PTS.length/6); PT_TYPES=d.types; PT_ADDRS=d.addrs; PT_CLS=d.cls; PT_Y0=d.y0;
+  if(!NPTS){ setBadge('No crime data returned.'); headerCount.innerHTML='Crime data: <b>0</b>'; return; }
   setBadge('<span class="spinner"></span> Building density surface...');
   setTimeout(function(){
-    heatBins=buildHeatBins(allFeatures); buildHeatLayer();
-    var n=allFeatures.length.toLocaleString();
+    heatBins=buildHeatBins(); buildHeatLayer();
+    var n=NPTS.toLocaleString();
     setBadge(n+' incidents mapped across '+heatBins.length.toLocaleString()+' cells');
     headerCount.innerHTML='Crime data: <b>'+n+'</b>';
     syncMode(true);

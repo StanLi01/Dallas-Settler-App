@@ -11,7 +11,7 @@ Analytic layers:
 
 Run:  python -m uvicorn main:app --port 8000
 """
-import os, math, re, statistics
+import os, json, math, re, statistics, sys, threading, zlib
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -20,7 +20,7 @@ import requests
 from requests.adapters import HTTPAdapter, Retry
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -32,14 +32,14 @@ CENSUS_API_KEY   = os.getenv("CENSUS_API_KEY",   "")
 DALLAS_CRIME_URL = "https://www.dallasopendata.com/resource/qv6i-rri7.json"
 
 CACHE_TTL_HOURS  = 6
-FETCH_PAGE_SIZE  = 50000
+FETCH_PAGE_SIZE  = 25000
 BUFFER_KM        = 1.0
 YEARS_BACK       = 4
 DALLAS_AREA_KM2  = 997.0
 
 CRIME_SELECT_COLS = (
-    "incidentnum,servyr,offincident,nibrs_crime_category,incident_address,"
-    "division,zip_code,geocoded_column,time1,day1,status,victimtype,"
+    "servyr,offincident,incident_address,"
+    "zip_code,geocoded_column,time1,day1,status,victimtype,"
     "premise,weaponused"
 )
 
@@ -55,6 +55,8 @@ _fetch_progress: Dict = {"status": "idle", "fetched": 0, "error": None}
 _baseline_cache: Dict = {"data": None}
 _zcta_cache: Dict     = {"data": None}
 _equity_cache: Dict   = {"data": None}
+_points_cache: Dict   = {"data": None}
+_fetch_lock = threading.Lock()
 
 app = FastAPI(title="The Settler App")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -295,56 +297,85 @@ def _parse_hour(t: str) -> Optional[int]:
 DAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-def normalize_soda_record(rec: Dict) -> Dict:
-    addr = (rec.get("incident_address") or "").strip()
-    lat = lon = None
+class Crime:
+    """One incident. Slotted (not a dict) so ~640k records fit in a small
+    server's memory. Supports r["key"] and {**r} like the dict it replaced."""
+    __slots__ = ("address", "lat", "lon", "year", "incident_type", "zip_code",
+                 "cls", "disc", "hour", "day", "status", "cleared", "arrest",
+                 "victim", "prem", "weapon")
+
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+    def __getitem__(self, k):
+        return getattr(self, k)
+
+    def get(self, k, default=None):
+        return getattr(self, k, default)
+
+    def keys(self):
+        return self.__slots__
+
+    def __contains__(self, k):
+        return k in self.__slots__
+
+
+_intern = sys.intern
+
+
+def normalize_soda_record(rec: Dict) -> Optional[Crime]:
+    """Returns None for records without coordinates (they can't be mapped)."""
     gc = rec.get("geocoded_column")
-    if isinstance(gc, dict):
-        try:
-            lat = float(gc.get("latitude")); lon = float(gc.get("longitude"))
-        except (TypeError, ValueError):
-            lat = lon = None
+    if not isinstance(gc, dict):
+        return None
+    try:
+        lat = float(gc.get("latitude")); lon = float(gc.get("longitude"))
+    except (TypeError, ValueError):
+        return None
     try:
         year = int(rec.get("servyr"))
     except (TypeError, ValueError):
         year = None
 
-    incident_type = rec.get("offincident") or "Unknown"
-    status = rec.get("status") or ""
+    incident_type = _intern(rec.get("offincident") or "Unknown")
+    status = _intern(rec.get("status") or "")
     day = (rec.get("day1") or "").strip()[:3].title()
 
-    return {
-        "address": addr, "lat": lat, "lon": lon, "year": year,
-        "incident_type": incident_type,
-        "category": rec.get("nibrs_crime_category") or incident_type,
-        "division": rec.get("division") or "",
-        "zip_code": (rec.get("zip_code") or "").strip(),
-        "cls": classify_offence(incident_type),
-        "disc": is_discretionary(incident_type),
-        "hour": _parse_hour(rec.get("time1")),
-        "day": day if day in DAY_ORDER else None,
-        "status": status,
-        "cleared": is_cleared(status),
-        "arrest": is_arrest(status),
-        "victim": (rec.get("victimtype") or "").strip(),
-        "prem": classify_premise(rec.get("premise")),
-        "premise_raw": (rec.get("premise") or "").strip(),
-        "weapon": has_weapon(rec.get("weaponused")),
-    }
+    return Crime(
+        address=_intern((rec.get("incident_address") or "").strip()),
+        lat=lat, lon=lon, year=year,
+        incident_type=incident_type,
+        zip_code=_intern((rec.get("zip_code") or "").strip()),
+        cls=classify_offence(incident_type),
+        disc=is_discretionary(incident_type),
+        hour=_parse_hour(rec.get("time1")),
+        day=_intern(day) if day in DAY_ORDER else None,
+        status=status,
+        cleared=is_cleared(status),
+        arrest=is_arrest(status),
+        victim=_intern((rec.get("victimtype") or "").strip()),
+        prem=classify_premise(rec.get("premise")),
+        weapon=has_weapon(rec.get("weaponused")),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
 #  FETCH
 # ══════════════════════════════════════════════════════════════════════════
 
-def _fetch_all_pages(min_year: int) -> List[Dict]:
+def _fetch_all_pages(min_year: int) -> List[Crime]:
+    """Pages through Dallas Open Data, normalising each page as it arrives so
+    the raw JSON never accumulates in memory."""
     global _fetch_progress
     _fetch_progress = {"status": "fetching", "fetched": 0, "error": None}
-    all_records: List[Dict] = []
+    records: List[Crime] = []
+    seen = 0
     offset = 0
     while True:
         params = {"$select": CRIME_SELECT_COLS, "$limit": FETCH_PAGE_SIZE,
-                  "$offset": offset, "$where": f"servyr >= {min_year}"}
+                  "$offset": offset, "$where": f"servyr >= {min_year}",
+                  "$order": ":id"}
         try:
             resp = session.get(DALLAS_CRIME_URL, params=params, headers=HEADERS, timeout=90)
             resp.raise_for_status()
@@ -355,41 +386,88 @@ def _fetch_all_pages(min_year: int) -> List[Dict]:
             break
         if not page:
             break
-        all_records.extend(page)
-        _fetch_progress["fetched"] = len(all_records)
-        print(f"[Settler] Fetched {len(page)} rows (total: {len(all_records)})")
-        if len(page) < FETCH_PAGE_SIZE:
+        n_page = len(page)
+        for raw in page:
+            r = normalize_soda_record(raw)
+            if r is not None:
+                records.append(r)
+        del page, resp
+        seen += n_page
+        _fetch_progress["fetched"] = seen
+        print(f"[Settler] Fetched {n_page} rows (total: {seen})")
+        if n_page < FETCH_PAGE_SIZE:
             break
         offset += FETCH_PAGE_SIZE
     _fetch_progress["status"] = "done"
-    return all_records
+    print(f"[Settler] Total records fetched: {seen}")
+    print(f"[Settler] Records with coordinates: {len(records)}")
+    return records
 
 
-def _fetch_and_cache_crimes() -> List[Dict]:
-    now = datetime.utcnow()
+def _cache_fresh(now: datetime) -> bool:
     c = _crime_cache
-    if (c["data"] is not None and c["fetched_at"]
-            and (now - c["fetched_at"]) < timedelta(hours=CACHE_TTL_HOURS)):
-        return c["data"]
-    raw = _fetch_all_pages(now.year - YEARS_BACK)
-    print(f"[Settler] Total records fetched: {len(raw)}")
-    norm = [normalize_soda_record(r) for r in raw]
-    norm = [r for r in norm if r["lat"] is not None and r["lon"] is not None]
-    print(f"[Settler] Records with coordinates: {len(norm)}")
-    c["data"] = norm
-    c["fetched_at"] = now
-    _baseline_cache["data"] = None
-    _equity_cache["data"] = None
-    return norm
+    return (c["data"] is not None and c["fetched_at"] is not None
+            and (now - c["fetched_at"]) < timedelta(hours=CACHE_TTL_HOURS))
 
 
-def build_geojson(crimes: List[Dict]) -> Dict:
-    return {"type": "FeatureCollection", "features": [
-        {"type": "Feature",
-         "geometry": {"type": "Point", "coordinates": [r["lon"], r["lat"]]},
-         "properties": {"a": r["address"], "t": r["incident_type"],
-                        "y": str(r["year"] or ""), "c": r["cls"]}}
-        for r in crimes]}
+def _fetch_and_cache_crimes() -> List[Crime]:
+    # The lock stops two simultaneous visitors from each downloading the full
+    # dataset, which would double memory use on a small server.
+    if _cache_fresh(datetime.utcnow()):
+        return _crime_cache["data"]
+    with _fetch_lock:
+        now = datetime.utcnow()
+        if _cache_fresh(now):
+            return _crime_cache["data"]
+        records = _fetch_all_pages(now.year - YEARS_BACK)
+        if not records and _crime_cache["data"]:
+            return _crime_cache["data"]   # keep stale data rather than nothing
+        _crime_cache["data"] = records
+        _crime_cache["fetched_at"] = now
+        _baseline_cache["data"] = None
+        _equity_cache["data"] = None
+        _points_cache["data"] = None
+        return records
+
+
+CLS_ORDER = ("violent", "property", "vice", "other")
+
+
+def build_points_gzip(crimes: List[Crime]) -> bytes:
+    """Map payload as gzipped compact JSON.
+
+    p is a flat array, 6 numbers per incident:
+        lat, lon, type index, class index, year - y0, address index
+    Incident types and addresses are sent once each in lookup tables. This is
+    ~10x smaller than GeoJSON before compression, and it is compressed in
+    chunks so the whole uncompressed string never sits in memory.
+    """
+    years = [r.year for r in crimes if r.year]
+    y0 = min(years) if years else 0
+    type_ix: Dict[str, int] = {}
+    addr_ix: Dict[str, int] = {}
+    cls_ix = {c: i for i, c in enumerate(CLS_ORDER)}
+    gz = zlib.compressobj(6, zlib.DEFLATED, 31)   # wbits 31 = gzip container
+    out = [gz.compress(b'{"p":[')]
+    buf: List[str] = []
+    first = True
+    for r in crimes:
+        ti = type_ix.setdefault(r.incident_type, len(type_ix))
+        ai = addr_ix.setdefault(r.address, len(addr_ix))
+        yo = (r.year - y0) if r.year else 0
+        row = f"{r.lat:.5f},{r.lon:.5f},{ti},{cls_ix.get(r.cls, 3)},{yo},{ai}"
+        buf.append(row if first else "," + row)
+        first = False
+        if len(buf) >= 5000:
+            out.append(gz.compress("".join(buf).encode()))
+            buf = []
+    out.append(gz.compress("".join(buf).encode()))
+    tail = ('],"y0":' + str(y0) + ',"cls":' + json.dumps(CLS_ORDER)
+            + ',"types":' + json.dumps(list(type_ix))
+            + ',"addrs":' + json.dumps(list(addr_ix)) + '}')
+    out.append(gz.compress(tail.encode()))
+    out.append(gz.flush())
+    return b"".join(out)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -920,7 +998,7 @@ async def index(request: Request):
 
 
 @app.post("/api/lookup")
-async def lookup(body: LookupRequest):
+def lookup(body: LookupRequest):
     address = body.address.strip()
     coord = is_coord_string(address)
     try:
@@ -936,7 +1014,7 @@ async def lookup(body: LookupRequest):
 
 
 @app.post("/api/analyze")
-async def analyze(body: AnalyzeRequest):
+def analyze(body: AnalyzeRequest):
     crimes = _fetch_and_cache_crimes()
     history = crime_history_matches(body.address, crimes)
     nearby = crimes_within_radius(body.lat, body.lon, crimes, BUFFER_KM)
@@ -976,9 +1054,16 @@ async def analyze(body: AnalyzeRequest):
     }
 
 
-@app.get("/api/crimes/geojson")
-async def crimes_geojson():
-    return JSONResponse(build_geojson(_fetch_and_cache_crimes()))
+@app.get("/api/crimes/points")
+def crimes_points():
+    crimes = _fetch_and_cache_crimes()
+    with _fetch_lock:
+        if _points_cache["data"] is None:
+            _points_cache["data"] = build_points_gzip(crimes)
+        body = _points_cache["data"]
+    return Response(content=body, media_type="application/json",
+                    headers={"Content-Encoding": "gzip",
+                             "Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/api/crimes/progress")
@@ -995,7 +1080,7 @@ async def crimes_status():
 
 
 @app.get("/api/clearance/by-class")
-async def clearance_by_class():
+def clearance_by_class():
     """Citywide clearance rate per offence class — the standardisation weights."""
     _fetch_and_cache_crimes()
     base = citywide_baseline()
@@ -1005,7 +1090,7 @@ async def clearance_by_class():
 
 
 @app.get("/api/equity/citywide")
-async def equity_citywide():
+def equity_citywide():
     _fetch_and_cache_crimes()
     prof = equity_profile()
     rows = sorted(prof["zips"].values(), key=lambda v: -v["disc_share"])
