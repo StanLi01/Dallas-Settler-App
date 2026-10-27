@@ -6,7 +6,7 @@ Search any Dallas address and Settler shows what has actually been happening aro
 
 ### ▶️ [Try it live](https://dallas-settler-app-9fh3.onrender.com)
 
-*Hosted on a free tier, so the first visit may take a minute to wake up.*
+*Hosted on a free tier, the first visit may take a minute to wake up.*
 
 <!-- SCREENSHOTS: add images to docs/, then uncomment:
 ![Map view](docs/map.png)
